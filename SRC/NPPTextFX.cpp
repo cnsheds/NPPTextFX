@@ -2266,28 +2266,74 @@ failbreak:
 EXTERNC unsigned numberconvert(char **dest,unsigned *destsz,unsigned *destlen,char from,char to) {
   unsigned rv=0;
   char *prefix; char temp[128];
+  char* tmpBuf = NULL, *pnextbuf = NULL;
+  unsigned newsize = *destsz;
   if (dest) {
-    int num;
-    switch(from) {
-    case 'c': num=strtol(*dest,NULL,0); break;
-    case 'd': num=strtol(*dest,NULL,10); break;
-    case 'h': num=strtol(*dest,NULL,16); break;
-    case 'b': num=strtol(*dest,NULL,2); break;
-    case 'o': num=strtol(*dest,NULL,8); break;
-    default: goto failbreak;
-    }
-    switch(to) {
-    case 'd': itoa(num,temp,10); prefix=""; break;
-    case 'h': itoa(num,temp,16); prefix="0x"; break;
-    case 'b': itoa(num,temp,2); prefix="$"; break;
-    case 'o': itoa(num,temp,8); prefix="0"; break;
-    default: goto failbreak;
-    }
-    *destlen=0;
-    sarmprintf(dest,destsz,destlen,"%s%s",prefix,temp);
-    if (*dest) rv=1;
+	  tmpBuf = (char *)mallocsafe(newsize, "numberconvert-start");
+	  unsigned tmplen = 0;
+	  if (!tmpBuf) {
+		  MessageBox(g_nppData._nppHandle, "Not enough memory", PLUGIN_NAME, MB_OK | MB_ICONSTOP);
+		  return rv;
+	  }
+	  memset(tmpBuf, 0, newsize);
+	  char *d, *end;
+	  for (d = *dest, end = *dest + *destlen; d < end; ) {
+		  while (d < end)
+		  {
+			  switch (*d)
+			  {
+			  case ',':
+			  case ';':
+			  case '\x20':
+			  case '\t':
+			  case '\r':
+			  case '\n':
+				  break;
+			  default: goto start;
+			  }
+			  tmpBuf[tmplen++] = *d++;
+			  tmpBuf[tmplen] = 0;
+		  }
+		  if (d >= end)
+			  break;
+
+		  start:
+		  int num;
+		  switch (from) {
+		  case 'c': num = strtol(d, &pnextbuf, 0); break;
+		  case 'd': num = strtol(d, &pnextbuf, 10); break;
+		  case 'h': num = strtol(d, &pnextbuf, 16); break;
+		  case 'b': num = strtol(d, &pnextbuf, 2); break;
+		  case 'o': num = strtol(d, &pnextbuf, 8); break;
+		  default: goto failbreak;
+		  }
+		  switch (to) {
+		  case 'd': itoa(num, temp, 10); prefix = ""; break;
+		  case 'h': itoa(num, temp, 16); prefix = "0x"; break;
+		  case 'b': itoa(num, temp, 2); prefix = "$"; break;
+		  case 'o': itoa(num, temp, 8); prefix = "0"; break;
+		  default: goto failbreak;
+		  }
+		  int len = _snprintf(tmpBuf + tmplen, *destsz - 1, "%s%s", prefix, temp);
+		  if (len < 0)
+		  {	// 不正常了, 中断循环
+			  pnextbuf = end;
+			  len = 0;
+		  }
+		  tmplen += len;
+		  tmpBuf[tmplen] = 0;
+		  d = pnextbuf;
+	  }
+	  
+	  strncpy_s(*dest, *destsz - 1, tmpBuf, *destsz - 1);
+	  (*dest)[*destsz - 1] = 0;
+	  *destlen = strlen(*dest);
+	  if (*dest) rv = 1;
   }
 failbreak:
+  if (tmpBuf)
+	  freesafe(tmpBuf, "numberconvert-end");
+
   return(rv);
 }
 
@@ -4005,7 +4051,7 @@ EXTERNC unsigned tidyHTML(char **dest,unsigned *destsz,unsigned *destlen,unsigne
           sln=output.size;
           *destsz=sln+1;
           rv=1;
-        } else MessageBox(g_nppData._nppHandle,"Out of memory in "PLUGIN_NAME" (not a HTMLtidy error)",PLUGIN_NAME, MB_OK|MB_ICONINFORMATION);
+        } else MessageBox(g_nppData._nppHandle,"Out of memory in " PLUGIN_NAME " (not a HTMLtidy error)",PLUGIN_NAME, MB_OK|MB_ICONINFORMATION);
         //freesafe(szPath,"tidyHTML");
         NPPGetSpecialFolderLocationarm(CSIDLX_TEXTFXTEMP,NULL,&szPath,&uPathSz,NULL,"HTMLTIDY.ERR");
         if (!(szPath/*=smprintfpath("%s%?\\%s%?\\%s",g_pszPluginpath,SUPPORT_PATH,"HTMLTIDY.ERR")*/)) goto tidyfree;
@@ -5307,7 +5353,7 @@ EXTERNC PFUNCPLUGINCMD pfswitchseltorectangular(void) {
 
 EXTERNC PFUNCPLUGINCMD pfhelp(void) {
   MessageBox(g_nppData._nppHandle,
-    "A Demo File NPP"PLUGIN_NAME"Demo.TXT was included with your distribution.\r\n"
+    "A Demo File NPP" PLUGIN_NAME "Demo.TXT was included with your distribution.\r\n"
     "Load this file and find the feature you need help on. A description and\r\n"
     "sample text is provided so you can see how each tool works. Read the entire\r\n"
     "demo file to get an idea of what all the tools do.",PLUGIN_NAME, MB_OK|MB_ICONINFORMATION);
@@ -5315,7 +5361,7 @@ EXTERNC PFUNCPLUGINCMD pfhelp(void) {
 // ensure this version number matches those in the Dev-C++ version resource
 EXTERNC PFUNCPLUGINCMD pfabout(void) {
   MessageBox(g_nppData._nppHandle,
-    PLUGIN_NAME " v0.25 " /* "Special " */ " ("
+    PLUGIN_NAME " v0.27 " /* "Special " */ " ("
 #if defined(__BORLANDC__)
   "Borland C++ 5.51"
 #elif defined(__POCC__)
@@ -5329,7 +5375,7 @@ EXTERNC PFUNCPLUGINCMD pfabout(void) {
 #elif defined(__MINGW32__)
   "MinGW/GCC 3.45"
 #endif
-    "), a GNU GPL Plugin for Notepad++ by Chris Severance,\r\n"// and other authors.\r\n"
+    "), a GNU GPL Plugin for Notepad++ by Chris Severance, Mod by Snow,\r\n"// and other authors.\r\n"
     "performs a variety of common conversions on selected text.\r\n"
 #if NPPDEBUG
     "\r\nThis DEBUG edition functions exactly like the non debug but the DLL is larger and you may\r\n"
@@ -6009,7 +6055,7 @@ EXTERNC void control_tidy(int stop) { // FALSE to start, TRUE to stop.
       EnableMenuItem(GetMenu(g_nppData._nppHandle), funcItem[findmenuitem(pfhtmltidy)]._cmdID, MF_BYCOMMAND);
       EnableMenuItem(GetMenu(g_nppData._nppHandle), funcItem[findmenuitem(pfmpxtidyrebuild)]._cmdID, MF_BYCOMMAND);
     } else { // Only disable the menu on startup. The menu may no longer be valid when exiting the DLL
-fail: if (errfunc) g_szTidyDLL_error=smprintf("Exported function %s not found in %s.\r\nThis "PLUGIN_NAME" build requires "TIDY_CALLQT" exports.",errfunc,"libTidy.dll");
+fail: if (errfunc) g_szTidyDLL_error=smprintf("Exported function %s not found in %s.\r\nThis " PLUGIN_NAME " build requires " TIDY_CALLQT " exports.",errfunc,"libTidy.dll");
       else g_szTidyDLL_error=smprintf("Unable to find %s in the system path\r\nor %s","libTidy.dll",szPath);
       EnableMenuItem(GetMenu(g_nppData._nppHandle), funcItem[findmenuitem(pfhtmltidy)]._cmdID, MF_BYCOMMAND | MF_GRAYED);
       EnableMenuItem(GetMenu(g_nppData._nppHandle), funcItem[findmenuitem(pfmpxtidyrebuild)]._cmdID, MF_BYCOMMAND | MF_GRAYED);
@@ -7670,7 +7716,7 @@ BOOL APIENTRY DllMain(HINSTANCE hInst, DWORD reason, LPVOID lpvReserved) {
     if (!(g_fLoadonce=CreateFileMapping( (HANDLE) 0xFFFFFFFF, NULL,PAGE_READWRITE, 0,4,"Notepad++" PLUGIN_NAME))) return FALSE;
     // Windows automatically closes this FileMapping when the last owner quits.
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-      MessageBox(0,"You can't load "PLUGIN_NAME" twice. Please delete the extra DLL in your Notepad ++ plugins folder",PLUGIN_NAME, MB_OK|MB_ICONINFORMATION);
+      MessageBox(0,"You can't load " PLUGIN_NAME " twice. Please delete the extra DLL in your Notepad ++ plugins folder",PLUGIN_NAME, MB_OK|MB_ICONINFORMATION);
       return(FALSE);
     }
 #if ENABLE_PUSHPOP
